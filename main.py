@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from demoparser2 import DemoParser
 import export_json
 import hltv_rating
+import parser
 import trades
 import utility
 import json
@@ -21,13 +22,14 @@ class PlayerData:
         self.kd = 0.0
 
 
-demo = DemoParser("./assets/testdemo.dem")
 tick_rate = 64
-df = demo.parse_player_info()
-df_player_hurt = demo.parse_event("player_hurt")
+df = parser.demo.parse_player_info()
+df_player_hurt = parser.demo.parse_event("player_hurt")
 player_dict: dict[str, PlayerData] = {}
 players = df
-kills = demo.parse_event("player_death", player=["X", "Y"], other=["kills_total"])
+kills = parser.demo.parse_event(
+    "player_death", player=["X", "Y"], other=["kills_total"]
+)
 utility_damage = utility.utility_damage()
 
 
