@@ -8,7 +8,6 @@ def export_killfeed_to_json(filename: str, player_dict: dict):
             "deaths": player_data.deaths,
             "assists": player_data.assists,
             "kd": player_data.kd,
-            "weapon_kills": player_data.weapon_kills,
         }
         for player_name, player_data in player_dict.items()
     }
