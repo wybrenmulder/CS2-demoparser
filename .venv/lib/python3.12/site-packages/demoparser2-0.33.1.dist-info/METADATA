@@ -1,0 +1,21 @@
+Metadata-Version: 2.3
+Name: demoparser2
+Version: 0.33.1
+Classifier: Programming Language :: Rust
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Requires-Dist: pandas >=1.5.0
+Requires-Dist: numpy
+Requires-Dist: polars
+Requires-Dist: pyarrow
+Requires-Dist: tqdm
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown; charset=UTF-8; variant=GFM
+
+# Building instructions
+
+```maturin develop --release```
+
+
+This should install demoparser2 to your current environment. You might need to do this in a venv/conda environment.
+

@@ -1,0 +1,52 @@
+{
+    "BrocOli": {
+        "he_damage": 23,
+        "molotov_damage": 4,
+        "utility_damage": 27
+    },
+    "Walter White": {
+        "he_damage": 0,
+        "molotov_damage": 0,
+        "utility_damage": 0
+    },
+    "SaYoNaRa BoY": {
+        "he_damage": 160,
+        "molotov_damage": 30,
+        "utility_damage": 190
+    },
+    "wybo": {
+        "he_damage": 66,
+        "molotov_damage": 92,
+        "utility_damage": 158
+    },
+    "S\u00e4ihketer\u00e4": {
+        "he_damage": 0,
+        "molotov_damage": 0,
+        "utility_damage": 0
+    },
+    "legalabb egy jaror kocsit": {
+        "he_damage": 66,
+        "molotov_damage": 89,
+        "utility_damage": 155
+    },
+    "PhilTastic": {
+        "he_damage": 28,
+        "molotov_damage": 0,
+        "utility_damage": 28
+    },
+    "HakkSchnitzel": {
+        "he_damage": 0,
+        "molotov_damage": 0,
+        "utility_damage": 0
+    },
+    "John Pceena": {
+        "he_damage": 14,
+        "molotov_damage": 0,
+        "utility_damage": 14
+    },
+    "v\u0332e\u0332x\u0332a\u0332": {
+        "he_damage": 0,
+        "molotov_damage": 0,
+        "utility_damage": 0
+    }
+}
