@@ -1,9 +1,6 @@
-import parser
-
-
-def utility_damage():
+def utility_damage(parser):
     # Get the damage data from the demo
-    df_player_hurt = parser.demo.parse_event("player_hurt")
+    df_player_hurt = parser.parse_event("player_hurt")
 
     # Initialize dictionaries to hold damage totals
     he_damage_totals = {}
