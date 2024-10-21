@@ -1,10 +1,11 @@
 from dataclasses import dataclass
+from demoparser2 import DemoParser
 
 
 @dataclass()  # init=True
 class PlayerStats:
     steamid: int
-    name: str
+    user_name: str
     team_number: int
     kills: int
     assists: int
@@ -39,10 +40,10 @@ class PlayerStats:
     avg_he_team_dmg: float
     avg_unused_utility: int
 
-    def __init__(self, parser):
-        self.steamid = 0
-        self.name = ""
-        self.team_number = 0
+    def __init__(self, steamid: int, player_name: str, team_number: int):
+        self.steamid = steamid
+        self.user_name = player_name
+        self.team_number = team_number
         self.kills = 0
         self.assists = 0
         self.rounds = 0
@@ -83,38 +84,57 @@ class DemoInfo:
     tick_rate: int
 
     def __init__(self, parser):
-        # Parse the rounds by counting 'round_end' events
-        self.rounds = self._count_rounds(parser)
-        # Get tick rate from the demo header or default to 64
-        self.tick_rate = self._get_tick_rate(parser)
+        self.rounds = self.get_rounds(parser)
+        self.tick_rate = 64
 
-    def _count_rounds(self, parser):
-        """
-        Counts the number of 'round_end' events in the demo to determine the total number of rounds played.
-        """
-        round_count = 0
-        for event in parser.events:  # Assuming parser.events has parsed events
-            if event.name == "round_end":
-                round_count += 1
+    def get_rounds(self, parser):
+        round_end_events = parser.parse_event("round_end")
+        round_count = len(round_end_events)
+
         return round_count
 
-    def _get_tick_rate(self, parser):
-        """
-        Retrieves the tick rate from the demo if available.
-        """
-        if hasattr(parser.header, "tick_rate"):
-            return parser.header.tick_rate
-        return 64  # Default tick rate if not available
 
+@dataclass
+class PlayerStatsManager:
+    players: dict[int, PlayerStats]
 
-# @dataclass
-# class DemoInfo:
-#     rounds: int
-#     tick_rate: int
+    def __init__(self, parser: DemoParser):
+        # Dictionary to hold PlayerStats objects keyed by steamid
+        self.players = {}
 
-#     def __init__(self):
-#         self.rounds = 0
-#         self.tick_rate = 64
+        # Parse player info at the start
+        playerinfo = parser.parse_player_info()
+        for _, player in playerinfo.iterrows():
+            steamid = player["steamid"]
+            username = player["name"]
+            team_number = player["team_number"]
+
+            # Create PlayerStats object for each player
+            self.players[steamid] = PlayerStats(steamid, username, team_number)
+
+    def process_player_deaths(self, parser: DemoParser):
+        # Parse player_death events
+        player_death_events = parser.parse_event("player_death")
+
+        for _, death in player_death_events.iterrows():
+            victim_steamid = int(death["user_steamid"])
+            attacker_steamid = int(death["attacker_steamid"])
+
+            # Update victim's death count
+            if victim_steamid in self.players:
+                self.players[victim_steamid].deaths += 1
+
+            # Update attacker's kill count, but only if the attacker isn't the same as the victim (not a suicide)
+            if attacker_steamid in self.players and attacker_steamid != victim_steamid:
+                self.players[attacker_steamid].kills += 1
+
+    def display_player_stats(self):
+        print("Player Stats:")
+        for stats in self.players.values():
+            print(f"Player: {stats.user_name} (SteamID: {stats.steamid})")
+            print(f"  Kills: {stats.kills}")
+            print(f"  Deaths: {stats.deaths}")
+            print("------------------------------")
 
 
 @dataclass
