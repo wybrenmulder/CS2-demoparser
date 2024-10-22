@@ -12,9 +12,12 @@ class PlayerStats:
     rounds: int
     deaths: int
     saves: int
-    damage: int
+    dmg_armor: int
+    dmg_health: int
+    fall_damage_taken: int
     kd: float
     kpr: float
+    dpr: float
     apr: float
     adr: float
     impact: float
@@ -49,9 +52,12 @@ class PlayerStats:
         self.rounds = 0
         self.deaths = 0
         self.saves = 0
-        self.damage = 0
+        self.dmg_armor = 0
+        self.dmg_health = 0
+        self.fall_damage_taken = 0
         self.kd = 0.0
         self.kpr = 0.0
+        self.dpr = 0.0
         self.apr = 0.0
         self.adr = 0.0
         self.impact = 0.0
@@ -99,41 +105,107 @@ class PlayerStatsManager:
     players: dict[int, PlayerStats]
 
     def __init__(self, parser: DemoParser):
-        # Dictionary to hold PlayerStats objects keyed by steamid
         self.players = {}
 
-        # Parse player info at the start
         playerinfo = parser.parse_player_info()
         for _, player in playerinfo.iterrows():
             steamid = player["steamid"]
             username = player["name"]
             team_number = player["team_number"]
 
-            # Create PlayerStats object for each player
             self.players[steamid] = PlayerStats(steamid, username, team_number)
 
-    def process_player_deaths(self, parser: DemoParser):
-        # Parse player_death events
+    def process_player_death(self, parser: DemoParser):
         player_death_events = parser.parse_event("player_death")
 
         for _, death in player_death_events.iterrows():
             victim_steamid = int(death["user_steamid"])
             attacker_steamid = int(death["attacker_steamid"])
+            assister_steamid = death.get("assister_steamid")
 
-            # Update victim's death count
+            if assister_steamid is not None:
+                assister_steamid = int(assister_steamid)
+
+            if attacker_steamid in self.players and attacker_steamid != victim_steamid:
+                self.players[attacker_steamid].kills += 1
+
             if victim_steamid in self.players:
                 self.players[victim_steamid].deaths += 1
 
-            # Update attacker's kill count, but only if the attacker isn't the same as the victim (not a suicide)
-            if attacker_steamid in self.players and attacker_steamid != victim_steamid:
-                self.players[attacker_steamid].kills += 1
+            if assister_steamid and assister_steamid in self.players:
+                self.players[assister_steamid].assists += 1
+
+    def process_player_hurt(self, parser: DemoParser):
+        player_hurt_events = parser.parse_event("player_hurt")
+
+        for _, dmg in player_hurt_events.iterrows():
+            victim_steamid = int(dmg["user_steamid"])  # Player who was hurt
+            dmg_health = int(dmg["dmg_health"])
+            dmg_armor = int(dmg["dmg_armor"])
+            weapon = dmg["weapon"]
+            attacker_name = dmg.get("attacker_name", None)  # Attacker name
+            attacker_steamid = dmg.get("attacker_steamid", None)
+
+            # Fall damage
+            if attacker_name is None and attacker_steamid is None and (weapon == "generic"):
+                if victim_steamid in self.players:
+                    self.players[victim_steamid].fall_damage_taken += dmg_health
+                continue
+
+            if attacker_steamid is not None:
+                attacker_steamid = int(attacker_steamid)
+                
+                if attacker_steamid in self.players and attacker_steamid != victim_steamid:
+                    self.players[attacker_steamid].dmg_health += dmg_health
+                    self.players[attacker_steamid].dmg_armor += dmg_armor
+
+    def calculate_kd(self):
+        for player in self.players.values():
+            if player.deaths > 0:
+                player.kd = player.kills / player.deaths
+            else:
+                player.kd = player.kills
+                
+    def calculate_per_round_values(self, parser: DemoParser):
+        # Get the total number of rounds in the demo
+        demo_info = DemoInfo(parser)
+        total_rounds = demo_info.rounds
+
+        # Calculate KPR, DPR, and APR for each player
+        for player in self.players.values():
+            if total_rounds > 0:
+                player.kpr = player.kills / total_rounds  # Kills per round
+                player.dpr = player.deaths / total_rounds  # Deaths per round
+                player.apr = player.assists / total_rounds  # Assists per round
+                player.adr = player.dmg_health / total_rounds
+            else:
+                # If total_rounds is 0 (unlikely but handle it), set values to 0
+                player.kpr = 0
+                player.dpr = 0
+                player.apr = 0
+                player.adr = 0
+
+    def calculate_impact(self):
+        for player in self.players.values():
+            player.impact = 2.13 * player.kpr + 0.42 * player.apr - 0.41
 
     def display_player_stats(self):
         print("Player Stats:")
         for stats in self.players.values():
             print(f"Player: {stats.user_name} (SteamID: {stats.steamid})")
-            print(f"  Kills: {stats.kills}")
-            print(f"  Deaths: {stats.deaths}")
+            # print(f"  Kills: {stats.kills}")
+            # print(f"  Deaths: {stats.deaths}")
+            # print(f"  Assists: {stats.assists}")
+            # print(f"  KD: {stats.kd:.2f}")
+            # print(f"  KPR: {stats.kpr:.2f}")
+            # print(f"  DPR: {stats.dpr:.2f}")
+            # print(f"  APR: {stats.apr:.2f}")
+            # print(f"  Impact: {stats.impact:.2f}")
+            print(f"  ADR: {stats.adr:.2f}")
+            # print(f"  Impact: {stats.impact:.2f}")
+            print(f"  Damage to Health: {stats.dmg_health}")
+            print(f"  Damage to Armor: {stats.dmg_armor}")
+            print(f"  Fall damage taken: {stats.fall_damage_taken}")
             print("------------------------------")
 
 
