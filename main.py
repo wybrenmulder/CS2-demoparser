@@ -9,6 +9,7 @@ def main():
 
     print(f"Total Rounds Played: {demo_info.rounds}")
     print(f"Tick Rate: {demo_info.tick_rate}")
+    print(f"Rounds:\n{demo_info.defined_rounds}")
 
     stats_manager = PlayerStatsManager(parser)
     stats_manager.process_player_death(parser)

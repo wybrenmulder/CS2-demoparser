@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from demoparser2 import DemoParser
+from pandas import DataFrame
 
 
-@dataclass()  # init=True
+@dataclass()
 class PlayerStats:
     steamid: int
     user_name: str
@@ -87,25 +88,51 @@ class PlayerStats:
 @dataclass
 class DemoInfo:
     rounds: int
+    defined_rounds: any
     tick_rate: int
+    round_end_delay: int
 
     def __init__(self, parser):
-        self.rounds = self.get_rounds(parser)
         self.tick_rate = 64
+        self.round_end_delay = 7 * self.tick_rate
+        self.rounds = self.get_rounds(parser)
+        self.defined_rounds = self.define_rounds(parser)
 
     def get_rounds(self, parser):
         round_end_events = parser.parse_event("round_end")
         round_count = len(round_end_events)
 
         return round_count
+    
+    def get_round_idx(self, tick: int):
+        for _, full_round in self.defined_rounds.iterrows():
+            if full_round["round_start"] <= tick <= full_round["round_end"] + self.round_end_delay:
+                return full_round["round"]
+        return None
+
+    def define_rounds(self, parser):
+        round_start = parser.parse_event("round_start")
+        round_end = parser.parse_event("round_end")
+
+        defined_rounds = {
+            "round": round_start["round"],
+            "round_start": round_start["tick"],
+            "round_end": round_end["tick"] + self.round_end_delay,
+        }
+
+        return DataFrame(data=defined_rounds)
 
 
 @dataclass
 class PlayerStatsManager:
     players: dict[int, PlayerStats]
+    demo_info: any
+    damage_tracker: dict
 
     def __init__(self, parser: DemoParser):
         self.players = {}
+        self.demo_info = DemoInfo(parser)
+        self.damage_tracker = {}
 
         playerinfo = parser.parse_player_info()
         for _, player in playerinfo.iterrows():
@@ -114,7 +141,7 @@ class PlayerStatsManager:
             team_number = player["team_number"]
 
             self.players[steamid] = PlayerStats(steamid, username, team_number)
-
+        
     def process_player_death(self, parser: DemoParser):
         player_death_events = parser.parse_event("player_death")
 
@@ -139,11 +166,15 @@ class PlayerStatsManager:
         player_hurt_events = parser.parse_event("player_hurt")
 
         for _, dmg in player_hurt_events.iterrows():
-            victim_steamid = int(dmg["user_steamid"])  # Player who was hurt
+            hurt_event_tick = int(dmg["tick"])
+            round_number = self.demo_info.get_round_idx(hurt_event_tick)
+            print(f"Hurt event in round {round_number}, tick {hurt_event_tick}")
+
+            victim_steamid = int(dmg["user_steamid"])
             dmg_health = int(dmg["dmg_health"])
             dmg_armor = int(dmg["dmg_armor"])
             weapon = dmg["weapon"]
-            attacker_name = dmg.get("attacker_name", None)  # Attacker name
+            attacker_name = dmg.get("attacker_name", None)
             attacker_steamid = dmg.get("attacker_steamid", None)
 
             # Fall damage
@@ -167,19 +198,17 @@ class PlayerStatsManager:
                 player.kd = player.kills
                 
     def calculate_per_round_values(self, parser: DemoParser):
-        # Get the total number of rounds in the demo
         demo_info = DemoInfo(parser)
         total_rounds = demo_info.rounds
 
         # Calculate KPR, DPR, and APR for each player
         for player in self.players.values():
             if total_rounds > 0:
-                player.kpr = player.kills / total_rounds  # Kills per round
-                player.dpr = player.deaths / total_rounds  # Deaths per round
-                player.apr = player.assists / total_rounds  # Assists per round
+                player.kpr = player.kills / total_rounds
+                player.dpr = player.deaths / total_rounds
+                player.apr = player.assists / total_rounds
                 player.adr = player.dmg_health / total_rounds
             else:
-                # If total_rounds is 0 (unlikely but handle it), set values to 0
                 player.kpr = 0
                 player.dpr = 0
                 player.apr = 0
@@ -190,9 +219,9 @@ class PlayerStatsManager:
             player.impact = 2.13 * player.kpr + 0.42 * player.apr - 0.41
 
     def display_player_stats(self):
-        print("Player Stats:")
         for stats in self.players.values():
-            print(f"Player: {stats.user_name} (SteamID: {stats.steamid})")
+            print(f"Player: {stats.user_name} Damage: {stats.dmg_health}")
+            # prinf(f"  SteamID: {stats.steamid}")
             # print(f"  Kills: {stats.kills}")
             # print(f"  Deaths: {stats.deaths}")
             # print(f"  Assists: {stats.assists}")
@@ -201,12 +230,12 @@ class PlayerStatsManager:
             # print(f"  DPR: {stats.dpr:.2f}")
             # print(f"  APR: {stats.apr:.2f}")
             # print(f"  Impact: {stats.impact:.2f}")
-            print(f"  ADR: {stats.adr:.2f}")
+            # print(f"  ADR: {stats.adr:.2f}")
             # print(f"  Impact: {stats.impact:.2f}")
-            print(f"  Damage to Health: {stats.dmg_health}")
-            print(f"  Damage to Armor: {stats.dmg_armor}")
-            print(f"  Fall damage taken: {stats.fall_damage_taken}")
-            print("------------------------------")
+            # print(f"  Damage to Health: {stats.dmg_health}")
+            # print(f"  Damage to Armor: {stats.dmg_armor}")
+            # print(f"  Fall damage taken: {stats.fall_damage_taken}")
+            # print("------------------------------")
 
 
 @dataclass
