@@ -7,7 +7,9 @@ from pandas import DataFrame
 class PlayerStats:
     steamid: int
     user_name: str
-    team_number: int
+    team_name: str
+    initial_health: int
+    remaining_health: int
     kills: int
     assists: int
     rounds: int
@@ -15,6 +17,7 @@ class PlayerStats:
     saves: int
     dmg_armor: int
     dmg_health: int
+    dmg_received: int
     fall_damage_taken: int
     kd: float
     kpr: float
@@ -44,10 +47,12 @@ class PlayerStats:
     avg_he_team_dmg: float
     avg_unused_utility: int
 
-    def __init__(self, steamid: int, player_name: str, team_number: int):
+    def __init__(self, steamid: int, player_name: str, team_name: str):
         self.steamid = steamid
         self.user_name = player_name
-        self.team_number = team_number
+        self.team_name = team_name
+        self.initial_health = 100
+        self.remaining_health = 100
         self.kills = 0
         self.assists = 0
         self.rounds = 0
@@ -55,6 +60,7 @@ class PlayerStats:
         self.saves = 0
         self.dmg_armor = 0
         self.dmg_health = 0
+        self.dmg_received = 0
         self.fall_damage_taken = 0
         self.kd = 0.0
         self.kpr = 0.0
@@ -87,10 +93,10 @@ class PlayerStats:
 
 @dataclass
 class DemoInfo:
-    rounds: int
-    defined_rounds: any
     tick_rate: int
     round_end_delay: int
+    rounds: int
+    defined_rounds: any
 
     def __init__(self, parser):
         self.tick_rate = 64
@@ -121,7 +127,7 @@ class DemoInfo:
         }
 
         return DataFrame(data=defined_rounds)
-
+    
 
 @dataclass
 class PlayerStatsManager:
@@ -139,8 +145,18 @@ class PlayerStatsManager:
             steamid = player["steamid"]
             username = player["name"]
             team_number = player["team_number"]
+            if team_number == 1:
+                team_name = "Spectators"
+            elif team_number == 2:
+                team_name = "CT"
+            elif team_number == 3:
+                team_name = "T"
+            else:
+                team_name = "Unknown"
 
-            self.players[steamid] = PlayerStats(steamid, username, team_number)
+            print(username, team_name, team_number)
+
+            self.players[steamid] = PlayerStats(steamid, username, team_name)
         
     def process_player_death(self, parser: DemoParser):
         player_death_events = parser.parse_event("player_death")
@@ -164,31 +180,86 @@ class PlayerStatsManager:
 
     def process_player_hurt(self, parser: DemoParser):
         player_hurt_events = parser.parse_event("player_hurt")
+        current_round = None  # Track the current round to detect changes
+
+        # Initialize damage tracking dictionaries
+        round_damage_summary = {}
+        total_damage_taken_per_victim = {}
 
         for _, dmg in player_hurt_events.iterrows():
             hurt_event_tick = int(dmg["tick"])
             round_number = self.demo_info.get_round_idx(hurt_event_tick)
-            print(f"Hurt event in round {round_number}, tick {hurt_event_tick}")
 
+            # Detect a new round and print the damage summary for the previous round
+            if current_round is not None and current_round != round_number:
+                print(f"--- End of Round {current_round} Damage Summary ---")
+                for attacker_id, victims in round_damage_summary.items():
+                    attacker_name = self.players[attacker_id].user_name
+                    for victim_id, dmg_amount in victims.items():
+                        victim_name = self.players[victim_id].user_name
+                        print(f"{attacker_name} dealt {dmg_amount} damage to {victim_name}")
+                print("---------------------------------------")
+
+                # Reset for new round
+                round_damage_summary.clear()
+                total_damage_taken_per_victim.clear()
+
+            current_round = round_number
             victim_steamid = int(dmg["user_steamid"])
+            victim_name = str(dmg["user_name"])
+            attacker_steamid = dmg.get("attacker_steamid", None)
+            attacker_name = str(dmg["attacker_name"])
             dmg_health = int(dmg["dmg_health"])
             dmg_armor = int(dmg["dmg_armor"])
-            weapon = dmg["weapon"]
-            attacker_name = dmg.get("attacker_name", None)
-            attacker_steamid = dmg.get("attacker_steamid", None)
+            weapon = str(dmg["weapon"])
+
+            print(f"Hurt event in round {round_number}, tick {hurt_event_tick}. {victim_name} took {dmg_health} damage from {attacker_name if attacker_steamid else 'FALL DAMAGE'} using a {weapon}.")
 
             # Fall damage
-            if attacker_name is None and attacker_steamid is None and (weapon == "generic"):
+            if attacker_steamid is None and not weapon:
                 if victim_steamid in self.players:
                     self.players[victim_steamid].fall_damage_taken += dmg_health
                 continue
 
             if attacker_steamid is not None:
                 attacker_steamid = int(attacker_steamid)
+
+                # Skip processing if attacker and victim are on the same team
+                if self.players[attacker_steamid].team_name == self.players[victim_steamid].team_name:
+                    print(f"Friendly fire ignored: {attacker_name} dealt {dmg_health} to {victim_name} (same team: {self.players[attacker_steamid].team_name})")
+                    continue
                 
-                if attacker_steamid in self.players and attacker_steamid != victim_steamid:
-                    self.players[attacker_steamid].dmg_health += dmg_health
-                    self.players[attacker_steamid].dmg_armor += dmg_armor
+                # Initialize entries
+                if attacker_steamid not in round_damage_summary:
+                    round_damage_summary[attacker_steamid] = {}
+                if victim_steamid not in round_damage_summary[attacker_steamid]:
+                    round_damage_summary[attacker_steamid][victim_steamid] = 0
+                if victim_steamid not in total_damage_taken_per_victim:
+                    total_damage_taken_per_victim[victim_steamid] = 0
+                
+                # Calculate damage while in damage cap
+                total_damage_so_far = total_damage_taken_per_victim[victim_steamid]
+                remaining_damage_cap = 100 - total_damage_so_far
+                effective_damage = min(dmg_health, remaining_damage_cap)
+
+                # Update damage taken by the victim and damage dealt by the attacker
+                total_damage_taken_per_victim[victim_steamid] += effective_damage
+                round_damage_summary[attacker_steamid][victim_steamid] += effective_damage
+
+                if effective_damage > 0:
+                    self.players[attacker_steamid].dmg_health += effective_damage
+
+                # Print clamping
+                if effective_damage < dmg_health:
+                    print(f"Damage clamped: {attacker_name} dealt {effective_damage} (instead of {dmg_health}) to {victim_name} to reach the 100 damage cap.")
+
+        print(f"--- End of Final Round {current_round} Damage Summary ---")
+        for attacker_id, victims in round_damage_summary.items():
+            attacker_name = self.players[attacker_id].user_name
+            for victim_id, dmg_amount in victims.items():
+                victim_name = self.players[victim_id].user_name
+                print(f"{attacker_name} dealt {dmg_amount} damage to {victim_name}")
+        print("---------------------------------------")
 
     def calculate_kd(self):
         for player in self.players.values():
@@ -196,7 +267,16 @@ class PlayerStatsManager:
                 player.kd = player.kills / player.deaths
             else:
                 player.kd = player.kills
-                
+
+    def check_for_saves(self):
+        pass
+
+    def check_for_trades(self):
+        pass
+
+    def calculate_kast(self):
+        pass
+
     def calculate_per_round_values(self, parser: DemoParser):
         demo_info = DemoInfo(parser)
         total_rounds = demo_info.rounds
@@ -218,9 +298,14 @@ class PlayerStatsManager:
         for player in self.players.values():
             player.impact = 2.13 * player.kpr + 0.42 * player.apr - 0.41
 
+    def calculate_hltv2(self):
+        for player in self.players.values():
+            player.hltv2 = 0.0073 * player.kast + 0.3591 * player.kpr + -0.5329 * player.dpr + 0.2372 * player.impact + 0.0032 * player.adr + 0.1587
+            # print(f"kast {player.kast}, kpr {player.kpr}, dpr {player.dpr}, impact {player.impact}, adr {player.adr}")
+
     def display_player_stats(self):
         for stats in self.players.values():
-            print(f"Player: {stats.user_name} Damage: {stats.dmg_health}")
+            print(f"Player: {stats.user_name}, {stats.dmg_health}")
             # prinf(f"  SteamID: {stats.steamid}")
             # print(f"  Kills: {stats.kills}")
             # print(f"  Deaths: {stats.deaths}")
@@ -232,6 +317,7 @@ class PlayerStatsManager:
             # print(f"  Impact: {stats.impact:.2f}")
             # print(f"  ADR: {stats.adr:.2f}")
             # print(f"  Impact: {stats.impact:.2f}")
+            # print(f" HLTV 2.0 Rating: {stats.hltv2:.2f}")
             # print(f"  Damage to Health: {stats.dmg_health}")
             # print(f"  Damage to Armor: {stats.dmg_armor}")
             # print(f"  Fall damage taken: {stats.fall_damage_taken}")

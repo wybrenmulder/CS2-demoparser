@@ -15,8 +15,10 @@ def main():
     stats_manager.process_player_death(parser)
     stats_manager.process_player_hurt(parser)
     stats_manager.calculate_kd()
+    stats_manager.calculate_kast()
     stats_manager.calculate_per_round_values(parser)
     stats_manager.calculate_impact()
+    stats_manager.calculate_hltv2()
 
     stats_manager.display_player_stats()
 
