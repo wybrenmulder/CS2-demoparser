@@ -227,6 +227,17 @@ class PlayerStatsManager:
                 # Skip processing if attacker and victim are on the same team
                 if self.players[attacker_steamid].team_name == self.players[victim_steamid].team_name:
                     print(f"Friendly fire ignored: {attacker_name} dealt {dmg_health} to {victim_name} (same team: {self.players[attacker_steamid].team_name})")
+                    
+                    # Update victim's health without crediting the attacker
+                    total_damage_so_far = total_damage_taken_per_victim.get(victim_steamid, 0)
+                    remaining_damage_cap = 100 - total_damage_so_far
+                    effective_damage = min(dmg_health, remaining_damage_cap)
+
+                    total_damage_taken_per_victim[victim_steamid] = total_damage_so_far + effective_damage
+                    self.players[victim_steamid].dmg_health += effective_damage
+                    self.players[victim_steamid].remaining_health -= effective_damage
+
+                    print(f"Teammate damage applied: {victim_name}'s health reduced by {effective_damage}. Remaining health: {self.players[victim_steamid].remaining_health}")
                     continue
                 
                 # Initialize entries
