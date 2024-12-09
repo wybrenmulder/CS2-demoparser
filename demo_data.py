@@ -219,6 +219,11 @@ class PlayerStatsManager:
             if attacker_steamid is None and not weapon:
                 if victim_steamid in self.players:
                     self.players[victim_steamid].fall_damage_taken += dmg_health
+                    
+                    # Ensure fall damage contributes to the total damage cap
+                    total_damage_so_far = total_damage_taken_per_victim.get(victim_steamid, 0)
+                    total_damage_taken_per_victim[victim_steamid] = total_damage_so_far + dmg_health
+                    print(f"{victim_name} took {dmg_health} fall damage. Total damage so far: {total_damage_taken_per_victim[victim_steamid]}")
                 continue
 
             if attacker_steamid is not None:
@@ -234,7 +239,6 @@ class PlayerStatsManager:
                     effective_damage = min(dmg_health, remaining_damage_cap)
 
                     total_damage_taken_per_victim[victim_steamid] = total_damage_so_far + effective_damage
-                    self.players[victim_steamid].dmg_health += effective_damage
                     self.players[victim_steamid].remaining_health -= effective_damage
 
                     print(f"Teammate damage applied: {victim_name}'s health reduced by {effective_damage}. Remaining health: {self.players[victim_steamid].remaining_health}")
