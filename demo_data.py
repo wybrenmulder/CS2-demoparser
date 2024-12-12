@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from demoparser2 import DemoParser
 from pandas import DataFrame
 
-
 @dataclass()
 class PlayerStats:
     steamid: int
@@ -163,18 +162,32 @@ class PlayerStatsManager:
 
         for _, death in player_death_events.iterrows():
             victim_steamid = int(death["user_steamid"])
-            attacker_steamid = int(death["attacker_steamid"])
+            attacker_steamid = death.get("attacker_steamid", None)  # Use .get to handle missing attacker
             assister_steamid = death.get("assister_steamid")
+            weapon = death.get("weapon", None)  # Retrieve the weapon used
 
             if assister_steamid is not None:
                 assister_steamid = int(assister_steamid)
 
-            if attacker_steamid in self.players and attacker_steamid != victim_steamid:
-                self.players[attacker_steamid].kills += 1
+            # Check if the victim died to a bomb explosion
+            if attacker_steamid is None and weapon == "planted_c4":
+                continue
 
+            # Exception for killed by world
+            if attacker_steamid is not None and weapon == "world":
+                continue
+
+            # If there's a valid attacker
+            if attacker_steamid is not None:
+                attacker_steamid = int(attacker_steamid)
+                if attacker_steamid in self.players and attacker_steamid != victim_steamid:
+                    self.players[attacker_steamid].kills += 1
+
+            # # Count the victim's death
             if victim_steamid in self.players:
                 self.players[victim_steamid].deaths += 1
 
+            # Count assists
             if assister_steamid and assister_steamid in self.players:
                 self.players[assister_steamid].assists += 1
 
@@ -320,19 +333,19 @@ class PlayerStatsManager:
 
     def display_player_stats(self):
         for stats in self.players.values():
-            print(f"Player: {stats.user_name}, {stats.dmg_health}")
+            print(f"Player: {stats.user_name}:")
             # prinf(f"  SteamID: {stats.steamid}")
-            # print(f"  Kills: {stats.kills}")
-            # print(f"  Deaths: {stats.deaths}")
+            print(f"  Kills: {stats.kills}")
+            print(f"  Deaths: {stats.deaths}")
             # print(f"  Assists: {stats.assists}")
             # print(f"  KD: {stats.kd:.2f}")
             # print(f"  KPR: {stats.kpr:.2f}")
             # print(f"  DPR: {stats.dpr:.2f}")
             # print(f"  APR: {stats.apr:.2f}")
             # print(f"  Impact: {stats.impact:.2f}")
-            # print(f"  ADR: {stats.adr:.2f}")
+            # print(f"  ADR: {round(stats.adr)}")
             # print(f"  Impact: {stats.impact:.2f}")
-            # print(f" HLTV 2.0 Rating: {stats.hltv2:.2f}")
+            # print(f"  HLTV 2.0 Rating: {stats.hltv2:.2f}")
             # print(f"  Damage to Health: {stats.dmg_health}")
             # print(f"  Damage to Armor: {stats.dmg_armor}")
             # print(f"  Fall damage taken: {stats.fall_damage_taken}")

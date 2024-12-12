@@ -1,7 +1,8 @@
 from demoparser2 import DemoParser
 from demo_data import DemoInfo, PlayerStatsManager
 
-parser = DemoParser("./assets/testdemo.dem")
+# parser = DemoParser("./assets/testdemo.dem")
+parser = DemoParser("./assets/save_clutch_testdemo.dem")
 
 
 def main():
