@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from demoparser2 import DemoParser
 from pandas import DataFrame
 
+
 @dataclass()
 class PlayerStats:
     steamid: int
@@ -105,13 +106,11 @@ class DemoInfo:
 
     def get_rounds(self, parser):
         round_end_events = parser.parse_event("round_end")
-        round_count = len(round_end_events)
-
-        return round_count
+        return len(round_end_events)
     
     def get_round_idx(self, tick: int):
         for _, full_round in self.defined_rounds.iterrows():
-            if full_round["round_start"] <= tick <= full_round["round_end"] + self.round_end_delay:
+            if full_round["round_start"] <= tick <= full_round["round_end_with_delay"]:
                 return full_round["round"]
         return None
 
@@ -122,11 +121,12 @@ class DemoInfo:
         defined_rounds = {
             "round": round_start["round"],
             "round_start": round_start["tick"],
-            "round_end": round_end["tick"] + self.round_end_delay,
+            "round_end": round_end["tick"],
+            "round_end_with_delay": round_end["tick"] + self.round_end_delay
         }
 
         return DataFrame(data=defined_rounds)
-    
+            
 
 @dataclass
 class PlayerStatsManager:
@@ -203,85 +203,97 @@ class PlayerStatsManager:
             hurt_event_tick = int(dmg["tick"])
             round_number = self.demo_info.get_round_idx(hurt_event_tick)
 
-            # Detect a new round and print the damage summary for the previous round
+            # Handle round transition
             if current_round is not None and current_round != round_number:
-                print(f"--- End of Round {current_round} Damage Summary ---")
-                for attacker_id, victims in round_damage_summary.items():
-                    attacker_name = self.players[attacker_id].user_name
-                    for victim_id, dmg_amount in victims.items():
-                        victim_name = self.players[victim_id].user_name
-                        print(f"{attacker_name} dealt {dmg_amount} damage to {victim_name}")
-                print("---------------------------------------")
-
-                # Reset for new round
+                self.print_round_summary(current_round, round_damage_summary)
                 round_damage_summary.clear()
                 total_damage_taken_per_victim.clear()
 
             current_round = round_number
-            victim_steamid = int(dmg["user_steamid"])
-            victim_name = str(dmg["user_name"])
-            attacker_steamid = dmg.get("attacker_steamid", None)
-            attacker_name = str(dmg["attacker_name"])
-            dmg_health = int(dmg["dmg_health"])
-            dmg_armor = int(dmg["dmg_armor"])
-            weapon = str(dmg["weapon"])
+            self.process_damage_event(dmg, round_damage_summary, total_damage_taken_per_victim)
 
-            print(f"Hurt event in round {round_number}, tick {hurt_event_tick}. {victim_name} took {dmg_health} damage from {attacker_name if attacker_steamid else 'FALL DAMAGE'} using a {weapon}.")
+        # Print final round summary
+        self.print_round_summary(current_round, round_damage_summary)
 
-            # Fall damage
-            if attacker_steamid is None and not weapon:
-                if victim_steamid in self.players:
-                    self.players[victim_steamid].fall_damage_taken += dmg_health
-                    
-                    # Ensure fall damage contributes to the total damage cap
-                    total_damage_so_far = total_damage_taken_per_victim.get(victim_steamid, 0)
-                    total_damage_taken_per_victim[victim_steamid] = total_damage_so_far + dmg_health
-                    print(f"{victim_name} took {dmg_health} fall damage. Total damage so far: {total_damage_taken_per_victim[victim_steamid]}")
-                continue
+    def process_damage_event(self, dmg, round_damage_summary, total_damage_taken_per_victim):
+        victim_steamid = int(dmg["user_steamid"])
+        victim_name = str(dmg["user_name"])
+        attacker_steamid = dmg.get("attacker_steamid", None)
+        attacker_name = str(dmg["attacker_name"]) if attacker_steamid else "FALL DAMAGE"
+        dmg_health = int(dmg["dmg_health"])
+        weapon = str(dmg["weapon"])
 
-            if attacker_steamid is not None:
-                attacker_steamid = int(attacker_steamid)
+        print(f"Hurt event: {victim_name} took {dmg_health} damage from {attacker_name} using {weapon}.")
 
-                # Skip processing if attacker and victim are on the same team
-                if self.players[attacker_steamid].team_name == self.players[victim_steamid].team_name:
-                    print(f"Friendly fire ignored: {attacker_name} dealt {dmg_health} to {victim_name} (same team: {self.players[attacker_steamid].team_name})")
-                    
-                    # Update victim's health without crediting the attacker
-                    total_damage_so_far = total_damage_taken_per_victim.get(victim_steamid, 0)
-                    remaining_damage_cap = 100 - total_damage_so_far
-                    effective_damage = min(dmg_health, remaining_damage_cap)
+        # Handle fall damage separately
+        if attacker_steamid is None:
+            self.process_fall_dmg(victim_steamid, dmg_health, total_damage_taken_per_victim)
+            return
 
-                    total_damage_taken_per_victim[victim_steamid] = total_damage_so_far + effective_damage
-                    self.players[victim_steamid].remaining_health -= effective_damage
+        attacker_steamid = int(attacker_steamid)
 
-                    print(f"Teammate damage applied: {victim_name}'s health reduced by {effective_damage}. Remaining health: {self.players[victim_steamid].remaining_health}")
-                    continue
-                
-                # Initialize entries
-                if attacker_steamid not in round_damage_summary:
-                    round_damage_summary[attacker_steamid] = {}
-                if victim_steamid not in round_damage_summary[attacker_steamid]:
-                    round_damage_summary[attacker_steamid][victim_steamid] = 0
-                if victim_steamid not in total_damage_taken_per_victim:
-                    total_damage_taken_per_victim[victim_steamid] = 0
-                
-                # Calculate damage while in damage cap
-                total_damage_so_far = total_damage_taken_per_victim[victim_steamid]
-                remaining_damage_cap = 100 - total_damage_so_far
-                effective_damage = min(dmg_health, remaining_damage_cap)
+        # Handle team damage
+        if self.is_friendly_fire(attacker_steamid, victim_steamid):
+            self.process_team_dmg(attacker_steamid, victim_steamid, dmg_health, total_damage_taken_per_victim)
+            return
 
-                # Update damage taken by the victim and damage dealt by the attacker
-                total_damage_taken_per_victim[victim_steamid] += effective_damage
-                round_damage_summary[attacker_steamid][victim_steamid] += effective_damage
+        # Track and clamp damage
+        self.track_damage(attacker_steamid, victim_steamid, dmg_health, round_damage_summary, total_damage_taken_per_victim)
 
-                if effective_damage > 0:
-                    self.players[attacker_steamid].dmg_health += effective_damage
+    def is_friendly_fire(self, attacker_steamid, victim_steamid):
+        return self.players[attacker_steamid].team_name == self.players[victim_steamid].team_name
 
-                # Print clamping
-                if effective_damage < dmg_health:
-                    print(f"Damage clamped: {attacker_name} dealt {effective_damage} (instead of {dmg_health}) to {victim_name} to reach the 100 damage cap.")
+    def process_fall_dmg(self, victim_steamid, dmg_health, total_damage_taken_per_victim):
+        # Handle fall damage logic
+        print(f"Processing fall damage: {dmg_health} damage to {self.players[victim_steamid].user_name}.")
+        total_damage_taken_so_far = total_damage_taken_per_victim.get(victim_steamid, 0)
+        remaining_damage_cap = 100 - total_damage_taken_so_far
+        effective_damage = min(dmg_health, remaining_damage_cap)
 
-        print(f"--- End of Final Round {current_round} Damage Summary ---")
+        total_damage_taken_per_victim[victim_steamid] = total_damage_taken_so_far + effective_damage
+        self.players[victim_steamid].remaining_health -= effective_damage
+
+        print(f"Fall damage applied: {self.players[victim_steamid].user_name}'s health reduced by {effective_damage}. Remaining health: {self.players[victim_steamid].remaining_health}")
+
+    def process_team_dmg(self, attacker_steamid, victim_steamid, dmg_health, total_damage_taken_per_victim):
+        # Handle team damage logic (friendly fire)
+        print(f"Processing team damage: {dmg_health} damage from {self.players[attacker_steamid].user_name} to {self.players[victim_steamid].user_name}.")
+        total_damage_taken_so_far = total_damage_taken_per_victim.get(victim_steamid, 0)
+        remaining_damage_cap = 100 - total_damage_taken_so_far
+        effective_damage = min(dmg_health, remaining_damage_cap)
+
+        total_damage_taken_per_victim[victim_steamid] = total_damage_taken_so_far + effective_damage
+        self.players[victim_steamid].remaining_health -= effective_damage
+
+        print(f"Teammate damage applied: {self.players[victim_steamid].user_name}'s health reduced by {effective_damage}. Remaining health: {self.players[victim_steamid].remaining_health}")
+
+    def track_damage(self, attacker_steamid, victim_steamid, dmg_health, round_damage_summary, total_damage_taken_per_victim):
+        # Track and clamp damage based on caps
+        total_damage_so_far = total_damage_taken_per_victim.get(victim_steamid, 0)
+        remaining_damage_cap = 100 - total_damage_so_far
+        effective_damage = min(dmg_health, remaining_damage_cap)
+
+        # Update damage dictionaries
+        if attacker_steamid not in round_damage_summary:
+            round_damage_summary[attacker_steamid] = {}
+        if victim_steamid not in round_damage_summary[attacker_steamid]:
+            round_damage_summary[attacker_steamid][victim_steamid] = 0
+        if victim_steamid not in total_damage_taken_per_victim:
+            total_damage_taken_per_victim[victim_steamid] = 0
+
+        # Apply the effective damage
+        total_damage_taken_per_victim[victim_steamid] += effective_damage
+        round_damage_summary[attacker_steamid][victim_steamid] += effective_damage
+
+        # Handle damage clamping
+        if effective_damage < dmg_health:
+            print(f"Damage clamped: {self.players[attacker_steamid].user_name} dealt {effective_damage} (instead of {dmg_health}) to {self.players[victim_steamid].user_name}.")
+
+        # Add to attacker’s total damage
+        self.players[attacker_steamid].dmg_health += effective_damage
+
+    def print_round_summary(self, round_number, round_damage_summary):
+        print(f"--- End of Round {round_number} Damage Summary ---")
         for attacker_id, victims in round_damage_summary.items():
             attacker_name = self.players[attacker_id].user_name
             for victim_id, dmg_amount in victims.items():
@@ -296,7 +308,16 @@ class PlayerStatsManager:
             else:
                 player.kd = player.kills
 
+    def check_for_clutches(self):
+        pass
+
     def check_for_saves(self):
+        pass
+
+    def check_ct_save(self):
+        pass
+
+    def check_t_save(self):
         pass
 
     def check_for_trades(self):
@@ -335,8 +356,8 @@ class PlayerStatsManager:
         for stats in self.players.values():
             print(f"Player: {stats.user_name}:")
             # prinf(f"  SteamID: {stats.steamid}")
-            print(f"  Kills: {stats.kills}")
-            print(f"  Deaths: {stats.deaths}")
+            # print(f"  Kills: {stats.kills}")
+            # print(f"  Deaths: {stats.deaths}")
             # print(f"  Assists: {stats.assists}")
             # print(f"  KD: {stats.kd:.2f}")
             # print(f"  KPR: {stats.kpr:.2f}")
@@ -349,6 +370,7 @@ class PlayerStatsManager:
             # print(f"  Damage to Health: {stats.dmg_health}")
             # print(f"  Damage to Armor: {stats.dmg_armor}")
             # print(f"  Fall damage taken: {stats.fall_damage_taken}")
+            print(f"  Rounds saved: {stats.saves}")
             # print("------------------------------")
 
 
