@@ -29,10 +29,10 @@ class PlayerStats:
     hltv2: float
     trade_kill_opportunities: int
     trade_kill_attempts: int
-    trade_kill_success: int
+    trade_kill_success: float
     traded_death_opportunities: int
     traded_death_attempts: int
-    traded_death_success: int
+    traded_death_success: float
     opd_attempts: float
     opd_success: float
     opd_traded: float
@@ -72,10 +72,10 @@ class PlayerStats:
         self.hltv2 = 0.0
         self.trade_kill_opportunities = 0
         self.trade_kill_attempts = 0
-        self.trade_kill_success = 0
+        self.trade_kill_success = 0.0
         self.traded_death_opportunities = 0
         self.traded_death_attempts = 0
-        self.traded_death_success = 0
+        self.traded_death_success = 0.0
         self.opd_attempts = 0.0
         self.opd_success = 0.0
         self.opd_traded = 0.0
@@ -126,19 +126,39 @@ class DemoInfo:
         }
 
         return DataFrame(data=defined_rounds)
-            
+    
+    def get_round_for_death(self, death_tick: int, round_info: DataFrame) -> (int, str):
+        
+        # Determines the round in which the death occurred or if it occurred during the delay period after a round.
+        # Returns a tuple (round_number, status), where status is 'normal' or 'after_end'.
+        
+        for _, round_data in round_info.iterrows():
+            # Normal round deaths
+            if round_data["round_start"] <= death_tick <= round_data["round_end"]:
+                return round_data["round"], "normal"
+
+            # Deaths after round end but within delay
+            if round_data["round_end"] < death_tick <= round_data["round_end_with_delay"]:
+                return round_data["round"], "after_end"
+
+        # If no match is found, return -1 or handle the error appropriately
+        return -1, "unknown"
+
 
 @dataclass
 class PlayerStatsManager:
     players: dict[int, PlayerStats]
     demo_info: any
     damage_tracker: dict
+    alive_at_round_end = dict
 
     def __init__(self, parser: DemoParser):
         self.players = {}
         self.demo_info = DemoInfo(parser)
         self.damage_tracker = {}
+        self.alive_at_round_end = {}
 
+    def declare_player(self, parser):
         playerinfo = parser.parse_player_info()
         for _, player in playerinfo.iterrows():
             steamid = player["steamid"]
@@ -156,15 +176,73 @@ class PlayerStatsManager:
             print(username, team_name, team_number)
 
             self.players[steamid] = PlayerStats(steamid, username, team_name)
+
+    def switch_sides(self, parser):
+        # Parse round end events to track rounds played
+        round_end_events = parser.parse_event("round_end", other=["total_rounds_played", "round_win_status"])
         
+        # Store initial teams (CT or T)
+        team_mapping = {steamid: player.team_name for steamid, player in self.players.items()}
+
+        for _, round_end in round_end_events.iterrows():
+            round_number = round_end.get("total_rounds_played", 0)
+
+            # **Switch AFTER Round 12 (so at Round 13)**
+            if round_number == 13 or (round_number > 24 and (round_number - 1) % 12 == 0):
+                # Swap teams correctly
+                for steamid in team_mapping:
+                    team_mapping[steamid] = "CT" if team_mapping[steamid] == "T" else "T"
+
+            # Create lists of players for each team
+            ct_players = [player.user_name for steamid, player in self.players.items() if team_mapping[steamid] == "CT"]
+            t_players = [player.user_name for steamid, player in self.players.items() if team_mapping[steamid] == "T"]
+
+            # Print correct teams per round
+            # print(f"Round {round_number}:")
+            # print(f"  CT: {', '.join(ct_players)}")
+            # print(f"  T: {', '.join(t_players)}\n")
+
+    def process_alive_at_round_end(self, parser: DemoParser):
+        player_death_events = parser.parse_event("player_death")
+        round_info = self.demo_info.define_rounds(parser)  # Get round info
+
+        alive_players = {}  # Track alive players per round
+
+        for _, death in player_death_events.iterrows():
+            victim_name = death["user_name"]
+            death_tick = int(death["tick"])
+            death_round = self.demo_info.get_round_for_death(death_tick, round_info)
+
+            # Initialize alive players at the start of each round
+            if death_round not in alive_players:
+                alive_players[death_round] = {
+                    "CT": [p.user_name for p in self.players.values() if p.team_name == "CT"],
+                    "T": [p.user_name for p in self.players.values() if p.team_name == "T"]
+                }
+
+            # Remove the victim from the alive players list
+            for team in ["CT", "T"]:
+                if victim_name in alive_players[death_round][team]:
+                    alive_players[death_round][team].remove(victim_name)
+
+        # Print remaining alive players at the END of each round
+        for round_num, teams in sorted(alive_players.items()):
+            print(f"\nRound {round_num} - Alive Players at End:")
+            print(f"  CT: {', '.join(teams['CT']) if teams['CT'] else 'None'}")
+            print(f"  T: {', '.join(teams['T']) if teams['T'] else 'None'}")
+
     def process_player_death(self, parser: DemoParser):
         player_death_events = parser.parse_event("player_death")
+        round_info = self.demo_info.define_rounds(parser)
 
         for _, death in player_death_events.iterrows():
             victim_steamid = int(death["user_steamid"])
-            attacker_steamid = death.get("attacker_steamid", None)  # Use .get to handle missing attacker
+            victim_name = death["user_name"]
+            attacker_steamid = death.get("attacker_steamid", None)
             assister_steamid = death.get("assister_steamid")
-            weapon = death.get("weapon", None)  # Retrieve the weapon used
+            weapon = death.get("weapon", None)
+            death_tick = int(death["tick"])
+            death_round, status = self.demo_info.get_round_for_death(death_tick, round_info)
 
             if assister_steamid is not None:
                 assister_steamid = int(assister_steamid)
@@ -183,13 +261,22 @@ class PlayerStatsManager:
                 if attacker_steamid in self.players and attacker_steamid != victim_steamid:
                     self.players[attacker_steamid].kills += 1
 
-            # # Count the victim's death
+            # Count the victim's death
             if victim_steamid in self.players:
                 self.players[victim_steamid].deaths += 1
 
             # Count assists
             if assister_steamid and assister_steamid in self.players:
                 self.players[assister_steamid].assists += 1
+
+            if status == "normal":
+                print(f"Player {victim_name} died in round {death_round}, tick {death_tick}.")
+            elif status == "after_end":
+                print(20 * "-")
+                print(f"EXCEPTION: Player {victim_name} died in the round_end_delay AFTER round {death_round} ended, tick {death_tick}.")
+                print(20 * "-")
+            else:
+                print(f"Player {victim_name} died at tick {death_tick}, but round couldn't be determined.")
 
     def process_player_hurt(self, parser: DemoParser):
         player_hurt_events = parser.parse_event("player_hurt")
@@ -308,23 +395,23 @@ class PlayerStatsManager:
             else:
                 player.kd = player.kills
 
-    def check_for_clutches(self):
-        pass
+    # def check_for_clutches(self):
+    #     pass
 
-    def check_for_saves(self):
-        pass
+    # def check_for_saves(self):
+    #     pass
 
-    def check_ct_save(self):
-        pass
+    # def check_ct_save(self):
+    #     pass
 
-    def check_t_save(self):
-        pass
+    # def check_t_save(self):
+    #     pass
 
-    def check_for_trades(self):
-        pass
+    # def check_for_trades(self):
+    #     pass
 
-    def calculate_kast(self):
-        pass
+    # def calculate_kast(self):
+    #     pass
 
     def calculate_per_round_values(self, parser: DemoParser):
         demo_info = DemoInfo(parser)
@@ -371,6 +458,12 @@ class PlayerStatsManager:
             # print(f"  Damage to Armor: {stats.dmg_armor}")
             # print(f"  Fall damage taken: {stats.fall_damage_taken}")
             print(f"  Rounds saved: {stats.saves}")
+            # print(f"  Trade kill opportunities {stats.trade_kill_opportunities}")
+            # print(f"  Trade kill attempts {stats.trade_kill_attempts}")
+            # print(f"  Trade kill success {stats.trade_kill_success}")
+            # print(f"  Traded death opportunities {stats.traded_death_opportunities}")
+            # print(f"  Traded death attempts {stats.traded_death_attempts}")
+            # print(f"  Traded death kill success {stats.traded_death_success}")
             # print("------------------------------")
 
 
