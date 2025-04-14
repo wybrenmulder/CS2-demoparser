@@ -3,3 +3,5 @@
 assets/testdemo.dem
 assets/save_clutch_testdemo.dem
 /.venv
+/.venv
+/.venv/bin

@@ -231,6 +231,76 @@ class PlayerStatsManager:
             print(f"  CT: {', '.join(teams['CT']) if teams['CT'] else 'None'}")
             print(f"  T: {', '.join(teams['T']) if teams['T'] else 'None'}")
 
+        return alive_players
+
+    def analyze_round_end_scenario(self, parser: DemoParser):
+        # Fetch round data directly inside the method
+        round_info = self.demo_info.define_rounds(parser)
+        player_death_events = parser.parse_event("player_death")
+        
+        # Dummy placeholders for actual game data
+        alive_players = self.process_alive_at_round_end(parser)
+        bomb_events_by_round = {}  # This should be populated based on actual data
+        bomb_defused_by_round = {}  # This should be populated based on actual data
+        
+        # Loop over rounds and analyze the scenario
+        for round_num in range(1, self.demo_info.rounds + 1):
+            round_damage_summary = {}  # Should be generated based on actual data
+            
+            # Call the round analysis logic, including status tracking
+            self.analyze_round_end_scenario_logic(
+                round_num,
+                alive_players.get(round_num, {"CT": [], "T": []}),
+                bomb_events_by_round.get(round_num, None),
+                bomb_defused_by_round.get(round_num, None),
+                round_damage_summary
+            )
+    
+    def analyze_round_end_scenario_logic(self, round_num, alive_players, bomb_planted_event, bomb_defused_event, round_damage_summary):
+        # Example analysis method (same as your earlier one, adjusted)
+        ct_alive = alive_players.get("CT", [])
+        t_alive = alive_players.get("T", [])
+        
+        # Round Win by Eliminations (if the other team is wiped out)
+        if not t_alive:
+            print(f"Round {round_num}: Round Win by Eliminations: CT's killed all T's!")
+            return
+        elif not ct_alive:
+            print(f"Round {round_num}: Round Win by Eliminations: T's killed all CT's!")
+            return
+
+        # Handle Clutch Scenarios (1vX)
+        if bomb_planted_event:
+            if len(ct_alive) == 1 and len(t_alive) > 0:  # 1vX CT clutch win
+                print(f"Round {round_num}: Clutch Win: {ct_alive[0]} eliminated all enemies in 1vX!")
+                return
+            elif len(t_alive) == 1 and len(ct_alive) > 0:  # 1vX T clutch win
+                print(f"Round {round_num}: Clutch Win: {t_alive[0]} eliminated all enemies in 1vX!")
+                return
+
+        # Handle Defuse Scenarios (Not Clutch)
+        if bomb_defused_event:
+            if bomb_defused_event['user_name'] and ct_alive and len(t_alive) > 0:  # CT defuses bomb while T's alive
+                print(f"Round {round_num}: Defuse Loss: CT's defused bomb while T's were still alive!")
+                return
+            elif bomb_defused_event['user_name'] and t_alive and len(ct_alive) > 0:  # T defuses bomb while CT's alive
+                print(f"Round {round_num}: Defuse Loss: T's defused bomb while CT's were still alive!")
+                return
+
+        # Handle Clutch Loss Scenarios
+        if len(ct_alive) == 1 and len(t_alive) > 0:  # 1vX CT clutch loss scenario
+            print(f"Round {round_num}: Clutch Loss: {ct_alive[0]} died while attempting to defuse or in other conditions!")
+            return
+        elif len(t_alive) == 1 and len(ct_alive) > 0:  # 1vX T clutch loss scenario
+            print(f"Round {round_num}: Clutch Loss: {t_alive[0]} died while attempting to plant or in other conditions!")
+            return
+
+        # Handle normal round win by eliminations after checking for defuse and clutch conditions
+        if not bomb_planted_event and len(t_alive) == 0:  # CT wins by eliminating T's
+            print(f"Round {round_num}: Round Win by Eliminations: CT's killed all T's!")
+        elif not bomb_planted_event and len(ct_alive) == 0:  # T wins by eliminating CT's
+            print(f"Round {round_num}: Round Win by Eliminations: T's killed all CT's!")
+
     def process_player_death(self, parser: DemoParser):
         player_death_events = parser.parse_event("player_death")
         round_info = self.demo_info.define_rounds(parser)
