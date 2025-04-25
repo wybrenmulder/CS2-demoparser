@@ -29,6 +29,7 @@ def main():
 
     stats_manager.switch_sides(parser)
     stats_manager.process_alive_at_round_end(parser)
+    stats_manager.get_winner_of_rounds(parser)
     stats_manager.analyze_round_end_scenario(parser)
 
 
